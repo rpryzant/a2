@@ -17,7 +17,7 @@ int main(int argc, char **argv) {
   char *args[BUFSIZ];
   while(buf == fgets(buf, BUFSIZ, stdin)) {
     
-    char *cur = buzf;
+    char *cur = buz;
     int tok_len = 0;
     args_i = 0;
     while(*cur != '\0') {
