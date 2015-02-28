@@ -9,6 +9,8 @@
  *    -error handling in parseExecCmd
  *    -debug builtin
  *    -why explosions when c-D
+ *    -get builtins to work
+ *    -get commands with multiple args to work
  */
 
 #include <stdio.h>
@@ -39,7 +41,6 @@ static void freeWsh(void);
 static int  tokenizeString(char *, token *); //currently not in use
 static int  parseExecCmd(char *);
 static int  execute(token *command, int cmd_len);
-
 /* BUILTINS */
 static int  isBuiltin(token tok);
 static void builtin(token *command, int cmd_len);
