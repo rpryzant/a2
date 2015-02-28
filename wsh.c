@@ -7,6 +7,7 @@
  *    -error handling for builtins and excecute
  *    -write a function that checks if tok is a builtin
  *    -error handling in parseExecCmd
+ *    -debug builtin
  *    -why explosions when c-D
  */
 
@@ -158,8 +159,6 @@ int isBuiltin(token tok) {
   }
   return 0;
 }
-
-
 
 /*
  * Executes built-in commands as specified by tokens in command.
