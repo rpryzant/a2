@@ -5,6 +5,9 @@
  * TODO:
  *    -exit [n] => exit with status N
  *    -error handling for builtins and excecute
+ *    -write a function that checks if tok is a builtin
+ *    -error handling in parseExecCmd
+ *    -why explosions when c-D
  */
 
 #include <stdio.h>
@@ -19,9 +22,11 @@
 typedef char* token;
 
 static int debug = 1;
-#define debugPrint if (debug) fprintf
+#define debugPrint if (debug) printf
 #define ANSI_GREEN   "\x1b[32m"
 #define ANSI_RESET   "\x1b[0m"
+#define SPECIAL      0b1
+#define BUILTIN      0b10
 
 /* GLOBALS */
 static char *CUR_PATH;
@@ -29,14 +34,18 @@ static hash EXEC_TABLE;
 /* UTILITIES */
 static void init(void);
 static void initKind(void);
-static int tokenizeString(char *, token *);
-static int execute(token *command, int cmd_len);
+static void freeWsh(void);
+static int  tokenizeString(char *, token *); //currently not in use
+static int  parseExecCmd(char *);
+static int  execute(token *command, int cmd_len);
+
 /* BUILTINS */
+static int  isBuiltin(token tok);
 static void builtin(token *command, int cmd_len);
 static void help(token command);
 static void cd(token path);
 static void jobs(void);
-
+static void exitWsh(void);
 /*
  * Break a string (buf) into tokens (placed in args)
  */
@@ -55,7 +64,12 @@ int tokenizeString(char *buf, token*args) {
       args_i++;
     }
     cur += tok_len;
-    if(strspn(cur, "#;&|<>")){
+
+    if(strspn(cur, ";\n")) {
+      //ship off args, args can now be overwritten
+      
+    }
+    else if(strspn(cur, "#&|<>")){
       args[args_i] = strndup(cur, 1);
       args_i++;
     }
@@ -63,6 +77,89 @@ int tokenizeString(char *buf, token*args) {
   }
   return args_i;
 }
+/*
+ * Break args into valid commands.
+ * Here we should also send appropriate flags to push the commmand to the
+ * right place (builtin, execute, or special), possibly returning an int?
+ * returns 0 when finished parsing commands.
+ * returns 0b1 for builtin
+ * returns 0b10 for specialp
+ * returns 0b1000 for execute
+ *does errything
+ */
+int parseExecCmd(char *buf) {
+  //pre: buf is a null terminated string
+  //post: buf is tokenized and commands in buf executed.
+  int flags = 0;
+  token cmd[256] = {0};
+  char  tok[1024] = {0};
+  int cmd_i = 0;
+  int tok_i = 0;
+
+  while(*buf == ' ') {buf++;}
+
+  while (*buf != '\0') {
+    if(isBuiltin(cmd[cmd_i])) 
+      flags |= BUILTIN;
+   
+    switch(*buf) {
+    case ' ':
+      cmd[cmd_i++] = strndup(tok, tok_i);
+      tok_i = 0;
+      break;
+    
+    case '#': case '<': case '>': case '&': case '|':
+      if(tok_i) 
+	cmd[cmd_i++] = strndup(tok, tok_i);
+      //push special char
+      tok[0] = *buf;
+      cmd[cmd_i++] = strndup(tok, 1);
+      tok_i = 0;
+      flags |= SPECIAL;
+      break;
+    
+    case ';': case '\n':
+      cmd[cmd_i++] = strndup(tok, tok_i);
+      if (flags&SPECIAL)     
+	{}//ship to special
+      else if(flags&BUILTIN)
+	builtin(cmd, cmd_i);
+      else                  
+	execute(cmd, cmd_i);
+      
+      cmd_i = 0;
+      tok_i = 0;
+      break;
+    
+    default:
+      tok[tok_i++] = *buf;
+    }
+    buf++;
+  }
+  //TODO error
+  return 0;
+}
+
+/** BUILTIN **/
+
+/*
+ * Checks whether tok is a builtin 
+ */
+int isBuiltin(token tok) {
+  //pre: tok is a valid token
+  //post: returns 1 if tok is a builtin, 0 otherwise
+  if(tok) {
+    if(!strcmp(tok, "cd")   || 
+       !strcmp(tok, "exit") ||
+       !strcmp(tok, "help") ||
+       !strcmp(tok, "jobs") ||
+       !strcmp(tok, "kill")) 
+      return 1;
+  }
+  return 0;
+}
+
+
 
 /*
  * Executes built-in commands as specified by tokens in command.
@@ -79,20 +176,20 @@ void builtin(token *command, int cmd_len) {
     cd(command[cur++]);
   }
   else if(!strcmp(first, "exit")) {
-    exit(0);
+    exitWsh();
   }
   else if(!strcmp(first, "help")) {
     if(cmd_len == 1) help(NULL);
     else             help(command[cur++]);
   }
   else if(!strcmp(first, "jobs")) {
-    debugPrint(stderr, "Tony's unemployed\n");
+    jobs();
   }
   else if(!strcmp(first, "kill")) {
-    debugPrint(stderr, "Die! Die!\n");
+    debugPrint("Die! Die!\n");
   }
   else {
-    debugPrint(stderr, "first token isn't a builtin\n");
+    debugPrint("first token isn't a builtin\n");
   }
 }
 
@@ -104,7 +201,7 @@ void cd(token path) {
     CUR_PATH = getcwd(CUR_PATH, PATH_MAX);
   } 
   else { 
-    debugPrint(stderr, "cd: %s: No such file or directory", path);
+    debugPrint("cd: %s: No such file or directory", path);
   }
 }
 
@@ -116,27 +213,43 @@ void help(token command) {
   //post: prints help on command
   if(command) {
     if(!strcmp(command, "cd")) {
-      debugPrint(stderr, "cd: cd [dir]\n\n\tChange the shell working directory to DIR.\n\tThe default DIR is the value of the HOME shell variable.\n");
+      fprintf(stdout, "cd: cd [dir]\n\n\tChange the shell working directory to DIR.\n\tThe default DIR is the value of the HOME shell variable.\n");
     }
     else if(!strcmp(command, "exit")) {
-      debugPrint(stderr, "exit: exit\n\n\tExit the shell.\n");
+      fprintf(stdout, "exit: exit\n\n\tExit the shell.\n");
     }
     else if(!strcmp(command, "help")) {
-      debugPrint(stderr, "help: help [command]\n\n\tDisplays brief summaries of builtin commands.\n\tIf command is specified, gives detailed help on commands matching the argument.\n");
+      fprintf(stdout, "help: help [command]\n\n\tDisplays brief summaries of builtin commands.\n\tIf command is specified, gives detailed help on commands matching the argument.\n");
     }
     else if(!strcmp(command, "jobs")) {
-      debugPrint(stderr, "jobs: jobs \n\n\tLists the active jobs.\n");
+      fprintf(stdout, "jobs: jobs \n\n\tLists the active jobs.\n");
     }
     else if(!strcmp(command, "kill")) {
-      debugPrint(stderr, "kill: kill [pid] [SIGSPEC|SIGNUM]\n\n\tSend the process identified by PID the signal named by\n\tSIGSPEC or SIGNUM. If neither SIGSPEC or SIGNUM is present, then\n\tSIGTERM is assumed.\n");
+      fprintf(stdout, "kill: kill [pid] [SIGSPEC|SIGNUM]\n\n\tSend the process identified by PID the signal named by\n\tSIGSPEC or SIGNUM. If neither SIGSPEC or SIGNUM is present, then\n\tSIGTERM is assumed.\n");
     }
     else {
-      debugPrint(stderr, "help: no help topics match '%s'.\n", command);
+      fprintf(stdout, "help: no help topics match '%s'.\n", command);
     }
   }
   else{
-    printf("These shell commands are defined internally.\nType 'help name' to find out more about the function 'name'.\n\n\t-cd\n\t-exit\n\t-help\n\t-jobs\n\t-kill\n");
+    fprintf(stdout, "These shell commands are defined internally.\nType 'help name' to find out more about the function 'name'.\n\n\t-cd\n\t-exit\n\t-help\n\t-jobs\n\t-kill\n");
   }
+}
+
+/*
+ * Stops all processes managed by wsh and exits normally.
+ */
+void exitWsh() {
+  //TODO: eventually kill all tasks, or warn users tasks are still running
+  exit(0);
+}
+
+/*
+ * Builtin that lists all current jobs.
+ */
+void jobs() {
+  //TODO
+  debugPrint("Tony's unemployed\n");
 }
 
 /*
@@ -145,7 +258,7 @@ void help(token command) {
 void initKind() {
   //pre: None
   //post: allocate  a hash table to translate executable -> full path specification                      
-  EXEC_TABLE = ht_alloc(997);                                                                           
+  EXEC_TABLE = ht_alloc(997);                                                                          
   // get path:                                                                                        
   char *path = getenv("PATH");  /* getenv(3) */
   char name[1024], basename[256];
@@ -179,6 +292,7 @@ void initKind() {
     }
   }
 }
+
 /*
  * Initializes global vars
  */
@@ -187,13 +301,20 @@ void init() {
   initKind();
 }
 
+/*
+ * Frees all allocated memory associated with Wsh.
+ */
+void freeWsh() {
+  ht_free(EXEC_TABLE);
+}
+
 /* 
  * Execute a command.
  */
 int execute(token *command, int cmd_len) {
   //pre: command is a single command & argument list with no special characters.
   //post: The command has been executed.
-  int pid;
+  pid_t pid;
   token first = *command;
   command++;
   pid = vfork();
@@ -215,20 +336,25 @@ int execute(token *command, int cmd_len) {
 int main(int argc, char **argv) {
   init();
   char buf[BUFSIZ];
-  char *args[BUFSIZ];
-  int num_tok;
+  //char *args[BUFSIZ];
+  //int num_tok;
   printf("%s%s%s$ ", ANSI_GREEN, CUR_PATH, ANSI_RESET);
   while(buf == fgets(buf, BUFSIZ, stdin)) {
-    num_tok = tokenizeString(buf, args);
-    builtin(args, num_tok);
-    execute(args, num_tok);
+    parseExecCmd(buf);
+    //num_tok = tokenizeString(buf, args);
+    // builtin(args, num_tok);
+    //execute(args, num_tok);
     printf("%s%s%s$ ", ANSI_GREEN, CUR_PATH, ANSI_RESET);
   }
+
+  /*
   int i;
   for(i = 0; i < num_tok; i++) {
     fprintf(stderr,"%s\n", args[i]);
     free(args[i]);
   }
-  
+  */
+  freeWsh();
+
   return 0;
 }
