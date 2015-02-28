@@ -1,6 +1,10 @@
 /*
  * An implementation of the Williams Shell.
  * (c) 2015 Tony Liu and Reid Pryzant.
+ * 
+ * TODO:
+ *    -exit [n] => exit with status N
+ *    -error handling for builtins and excecute
  */
 
 #include <stdio.h>
@@ -16,6 +20,8 @@ typedef char* token;
 
 static int debug = 1;
 #define debugPrint if (debug) fprintf
+#define ANSI_GREEN   "\x1b[32m"
+#define ANSI_RESET   "\x1b[0m"
 
 /* GLOBALS */
 static char *CUR_PATH;
@@ -25,7 +31,6 @@ static void init(void);
 static void initKind(void);
 static int tokenizeString(char *, token *);
 static int execute(token *command, int cmd_len);
-
 /* BUILTINS */
 static void builtin(token *command, int cmd_len);
 static void help(token command);
@@ -83,6 +88,9 @@ void builtin(token *command, int cmd_len) {
   else if(!strcmp(first, "jobs")) {
     debugPrint(stderr, "Tony's unemployed\n");
   }
+  else if(!strcmp(first, "kill")) {
+    debugPrint(stderr, "Die! Die!\n");
+  }
   else {
     debugPrint(stderr, "first token isn't a builtin\n");
   }
@@ -107,16 +115,36 @@ void help(token command) {
   //pre: command is a builtin, or NULL
   //post: prints help on command
   if(command) {
-    //TODO
-    debugPrint(stderr, "input isn't a builtin\n");
+    if(!strcmp(command, "cd")) {
+      debugPrint(stderr, "cd: cd [dir]\n\n\tChange the shell working directory to DIR.\n\tThe default DIR is the value of the HOME shell variable.\n");
+    }
+    else if(!strcmp(command, "exit")) {
+      debugPrint(stderr, "exit: exit\n\n\tExit the shell.\n");
+    }
+    else if(!strcmp(command, "help")) {
+      debugPrint(stderr, "help: help [command]\n\n\tDisplays brief summaries of builtin commands.\n\tIf command is specified, gives detailed help on commands matching the argument.\n");
+    }
+    else if(!strcmp(command, "jobs")) {
+      debugPrint(stderr, "jobs: jobs \n\n\tLists the active jobs.\n");
+    }
+    else if(!strcmp(command, "kill")) {
+      debugPrint(stderr, "kill: kill [pid] [SIGSPEC|SIGNUM]\n\n\tSend the process identified by PID the signal named by\n\tSIGSPEC or SIGNUM. If neither SIGSPEC or SIGNUM is present, then\n\tSIGTERM is assumed.\n");
+    }
+    else {
+      debugPrint(stderr, "help: no help topics match '%s'.\n", command);
+    }
   }
   else{
-    printf("Here's info about help\n");
+    printf("These shell commands are defined internally.\nType 'help name' to find out more about the function 'name'.\n\n\t-cd\n\t-exit\n\t-help\n\t-jobs\n\t-kill\n");
   }
 }
 
+/*
+ * Initializes excecutable commands. 
+ */
 void initKind() {
-  // allocate a hash table to translate executable -> full path specification                         
+  //pre: None
+  //post: allocate  a hash table to translate executable -> full path specification                      
   EXEC_TABLE = ht_alloc(997);                                                                           
   // get path:                                                                                        
   char *path = getenv("PATH");  /* getenv(3) */
@@ -151,13 +179,20 @@ void initKind() {
     }
   }
 }
-
+/*
+ * Initializes global vars
+ */
 void init() {
   CUR_PATH = getcwd(CUR_PATH, PATH_MAX);
   initKind();
 }
 
+/* 
+ * Execute a command.
+ */
 int execute(token *command, int cmd_len) {
+  //pre: command is a single command & argument list with no special characters.
+  //post: The command has been executed.
   int pid;
   token first = *command;
   command++;
@@ -182,10 +217,12 @@ int main(int argc, char **argv) {
   char buf[BUFSIZ];
   char *args[BUFSIZ];
   int num_tok;
+  printf("%s%s%s$ ", ANSI_GREEN, CUR_PATH, ANSI_RESET);
   while(buf == fgets(buf, BUFSIZ, stdin)) {
     num_tok = tokenizeString(buf, args);
-    //builtin(args, num_tok);
+    builtin(args, num_tok);
     execute(args, num_tok);
+    printf("%s%s%s$ ", ANSI_GREEN, CUR_PATH, ANSI_RESET);
   }
   int i;
   for(i = 0; i < num_tok; i++) {
