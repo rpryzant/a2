@@ -213,11 +213,13 @@ int builtin(token *command, int cmd_len) {
  * changes the current working directory to specified path
  */
 void cd(token path) {
+  if (!path) 
+    path = "/";
   if (!chdir(path)) {
     CUR_PATH = getcwd(CUR_PATH, PATH_MAX);
   } 
   else { 
-    debugPrint("cd: %s: No such file or directory", path);
+    debugPrint("cd: %s: No such file or directory.\n", path);
   }
 }
 
