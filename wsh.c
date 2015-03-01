@@ -8,8 +8,7 @@
  *    -write a function that checks if tok is a builtin
  *    -error handling in parseExecCmd
  *    -debug builtin
- *    -why explosions when c-D
- *    -get builtins to work
+ *    -get builtins to work, need better way to do this (see parseExexCmd)
  *    -get commands with multiple args to work
  */
 
@@ -84,14 +83,11 @@ int tokenizeString(char *buf, token*args) {
  * Here we should also send appropriate flags to push the commmand to the
  * right place (builtin, execute, or special), possibly returning an int?
  * returns 0 when finished parsing commands.
- * returns 0b1 for builtin
- * returns 0b10 for specialp
- * returns 0b1000 for execute
- *does errything
  */
 int parseExecCmd(char *buf) {
   //pre: buf is a null terminated string
   //post: buf is tokenized and commands in buf executed.
+  //TODO: repeated builtin check is ugly...how to handle?
   int flags = 0;
   token cmd[256] = {0};
   char  tok[1024] = {0};
@@ -101,18 +97,26 @@ int parseExecCmd(char *buf) {
   while(*buf == ' ') {buf++;}
 
   while (*buf != '\0') {
-    if(isBuiltin(cmd[cmd_i])) 
-      flags |= BUILTIN;
    
     switch(*buf) {
     case ' ':
-      cmd[cmd_i++] = strndup(tok, tok_i);
-      tok_i = 0;
+      if(tok_i) {
+	cmd[cmd_i++] = strndup(tok, tok_i);
+	
+	if(isBuiltin(cmd[cmd_i-1])) 
+	  flags |= BUILTIN;
+
+	tok_i = 0;
+      }
       break;
     
     case '#': case '<': case '>': case '&': case '|':
-      if(tok_i) 
+      if(tok_i){ 	
 	cmd[cmd_i++] = strndup(tok, tok_i);
+	
+	if(isBuiltin(cmd[cmd_i-1])) 
+	  flags |= BUILTIN;	
+      }
       //push special char
       tok[0] = *buf;
       cmd[cmd_i++] = strndup(tok, 1);
@@ -121,7 +125,13 @@ int parseExecCmd(char *buf) {
       break;
     
     case ';': case '\n':
-      cmd[cmd_i++] = strndup(tok, tok_i);
+      if(tok_i) {
+	cmd[cmd_i++] = strndup(tok, tok_i);
+	
+	if(isBuiltin(cmd[cmd_i-1])) 
+	  flags |= BUILTIN;	
+      }
+
       if (flags&SPECIAL)     
 	{}//ship to special
       else if(flags&BUILTIN)
@@ -138,7 +148,7 @@ int parseExecCmd(char *buf) {
     }
     buf++;
   }
-  //TODO error
+  //TODO error handling
   return 0;
 }
 
@@ -315,16 +325,20 @@ int execute(token *command, int cmd_len) {
   //pre: command is a single command & argument list with no special characters.
   //post: The command has been executed.
   pid_t pid;
-  token first = *command;
-  command++;
+  token first = *command++;
   pid = vfork();
   char *cmd_path;
   // child process
   if (pid == 0) {
     cmd_path = ht_get(EXEC_TABLE, first);
     if(cmd_path) {
-      //TODO: error handling
-      execv(cmd_path, command);
+      if(cmd_len)
+	execv(cmd_path, command);
+    }
+    else {
+      //TODO: better error handling
+      fprintf(stdout, "%s: Command not found\n", first);
+      exit(0);
     }
   } 
   else{
