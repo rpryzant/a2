@@ -6,7 +6,6 @@
  *    -exit [n] => exit with status N
  *    -error handling for builtins and excecute
  *    -write a function that checks if tok is a builtin
- *    -error handling in parseExecCmd
  *    -debug builtin
  *    -get builtins to work, need better way to do this (see parseExexCmd)
  */
@@ -43,7 +42,7 @@ static int  parseExecCmd(char *);
 static int  execute(token *command, int cmd_len);
 /* BUILTINS */
 static int  isBuiltin(token tok);
-static void builtin(token *command, int cmd_len);
+static int  builtin(token *command, int cmd_len);
 static void help(token command);
 static void cd(token path);
 static void jobs(void);
@@ -95,6 +94,7 @@ int parseExecCmd(char *buf) {
   char  tok[1024] = {0};
   int cmd_i = 0;
   int tok_i = 0;
+  int error;
 
   while(*buf == ' ') {buf++;}
 
@@ -137,9 +137,9 @@ int parseExecCmd(char *buf) {
       if (flags&SPECIAL)     
 	{}//ship to special
       else if(flags&BUILTIN)
-	builtin(cmd, cmd_i);
+	error = builtin(cmd, cmd_i);
       else                  
-	execute(cmd, cmd_i);
+	error = execute(cmd, cmd_i);
       
       cmd_i = 0;
       tok_i = 0;
@@ -150,8 +150,10 @@ int parseExecCmd(char *buf) {
     }
     buf++;
   }
-  //TODO error handling
-  return 0;
+  if (error) 
+    return -1;
+  else
+    return 0;
 }
 
 /** BUILTIN **/
@@ -176,9 +178,9 @@ int isBuiltin(token tok) {
 /*
  * Executes built-in commands as specified by tokens in command.
  */
-void builtin(token *command, int cmd_len) {
+int builtin(token *command, int cmd_len) {
   //pre:  command contains valid builtin command
-  //post: command is executed
+  //post: return 0 command is executed, -1 otherwise
   
   //first token is the command itself
   int cur = 0;
@@ -202,7 +204,9 @@ void builtin(token *command, int cmd_len) {
   }
   else {
     debugPrint("first token isn't a builtin\n");
+    return -1;
   }
+  return 0;
 }
 
 /*
@@ -325,10 +329,11 @@ void freeWsh() {
  */
 int execute(token *command, int cmd_len) {
   //pre: command is a single command & argument list with no special characters.
-  //post: The command has been executed.
+  //post: the command is executed and status is returned.
   token first = *command;
   pid_t pid = vfork();
   char *cmd_path;
+  int status;
   // child process
   if (pid == 0) {
     cmd_path = ht_get(EXEC_TABLE, first);
@@ -337,15 +342,15 @@ int execute(token *command, int cmd_len) {
 	execv(cmd_path, command);
     }
     else {
-      //TODO: better error handling
       fprintf(stdout, "%s: Command not found\n", first);
-      exit(0);
+      exit(-1);
     }
   } 
-  else{
-    wait(NULL);
+  // parent process
+  else {
+    waitpid(pid, &status, 0);
   }
-  return 0;
+  return status;  
 }
 
 int main(int argc, char **argv) {
@@ -356,6 +361,7 @@ int main(int argc, char **argv) {
   printf("%s%s%s$ ", ANSI_GREEN, CUR_PATH, ANSI_RESET);
   while(buf == fgets(buf, BUFSIZ, stdin)) {
     parseExecCmd(buf);
+
     //num_tok = tokenizeString(buf, args);
     // builtin(args, num_tok);
     //execute(args, num_tok);
