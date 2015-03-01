@@ -9,7 +9,6 @@
  *    -error handling in parseExecCmd
  *    -debug builtin
  *    -get builtins to work, need better way to do this (see parseExexCmd)
- *    -get commands with multiple args to work
  */
 
 #include <stdio.h>
@@ -327,7 +326,7 @@ void freeWsh() {
 int execute(token *command, int cmd_len) {
   //pre: command is a single command & argument list with no special characters.
   //post: The command has been executed.
-  token first = *command++;
+  token first = *command;
   pid_t pid = vfork();
   char *cmd_path;
   // child process
