@@ -137,9 +137,9 @@ int parseExecCmd(char *buf) {
       if (flags&SPECIAL)     
 	{}//ship to special
       else if(flags&BUILTIN)
-	error = builtin(cmd, cmd_i);
+	error += builtin(cmd, cmd_i);
       else                  
-	error = execute(cmd, cmd_i);
+	error += execute(cmd, cmd_i);
       
       cmd_i = 0;
       tok_i = 0;
