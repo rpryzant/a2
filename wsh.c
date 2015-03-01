@@ -24,11 +24,13 @@
 typedef char* token;
 
 static int debug = 1;
+
 #define debugPrint if (debug) printf
 #define ANSI_GREEN   "\x1b[32m"
 #define ANSI_RESET   "\x1b[0m"
 #define SPECIAL      0b1
 #define BUILTIN      0b10
+
 
 /* GLOBALS */
 static char *CUR_PATH;
@@ -47,6 +49,7 @@ static void help(token command);
 static void cd(token path);
 static void jobs(void);
 static void exitWsh(void);
+
 /*
  * Break a string (buf) into tokens (placed in args)
  */
@@ -324,9 +327,8 @@ void freeWsh() {
 int execute(token *command, int cmd_len) {
   //pre: command is a single command & argument list with no special characters.
   //post: The command has been executed.
-  pid_t pid;
   token first = *command++;
-  pid = vfork();
+  pid_t pid = vfork();
   char *cmd_path;
   // child process
   if (pid == 0) {
