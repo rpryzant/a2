@@ -138,7 +138,7 @@ int parseExecCmd(char *buf) {
 	{}//ship to special
       else if(flags&BUILTIN)
 	error += builtin(cmd, cmd_i);
-      else                  
+      else if(cmd_i)                 
 	error += execute(cmd, cmd_i);
       
       cmd_i = 0;
@@ -333,8 +333,8 @@ int execute(token *command, int cmd_len) {
   //pre: command is a single command & argument list with no special characters.
   //post: the command is executed and status is returned.
   token first = *command;
-  pid_t pid = vfork();
   char *cmd_path;
+  pid_t pid = vfork();
   int status;
   // child process
   if (pid == 0) {
@@ -358,25 +358,16 @@ int execute(token *command, int cmd_len) {
 int main(int argc, char **argv) {
   init();
   char buf[BUFSIZ];
-  //char *args[BUFSIZ];
-  //int num_tok;
+
   printf("%s%s%s$ ", ANSI_GREEN, CUR_PATH, ANSI_RESET);
+
+  parseExecCmd("\n");
+  
+
   while(buf == fgets(buf, BUFSIZ, stdin)) {
     parseExecCmd(buf);
-
-    //num_tok = tokenizeString(buf, args);
-    // builtin(args, num_tok);
-    //execute(args, num_tok);
     printf("%s%s%s$ ", ANSI_GREEN, CUR_PATH, ANSI_RESET);
   }
-
-  /*
-  int i;
-  for(i = 0; i < num_tok; i++) {
-    fprintf(stderr,"%s\n", args[i]);
-    free(args[i]);
-  }
-  */
   freeWsh();
 
   return 0;
