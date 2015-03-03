@@ -4,10 +4,7 @@
  * 
  * TODO:
  *    -exit [n] => exit with status N
- *    -error handling for builtins and excecute
- *    -write a function that checks if tok is a builtin
- *    -debug builtin
- *    -get builtins to work, need better way to do this (see parseExexCmd)
+ *    -special characters
  */
 
 #include <stdio.h>
@@ -15,6 +12,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <dirent.h>
+#include <fcntl.h>
 #include <sys/wait.h>
 
 #include "hash.h"
@@ -41,13 +39,13 @@ static int  tokenizeString(char *, token *); //currently not in use
 static int  parseExecCmd(char *);
 static int  execute(token *command, int cmd_len);
 /* BUILTINS */
-static int  isBuiltin(token tok);
 static int  builtin(token *command, int cmd_len);
 static void help(token command);
 static void cd(token path);
 static void jobs(void);
 static void exitWsh(void);
-
+/* SPECIALS */
+static int special(token *command, int cmd_len);
 /*
  * Break a string (buf) into tokens (placed in args)
  */
@@ -104,21 +102,14 @@ int parseExecCmd(char *buf) {
     case ' ':
       if(tok_i) {
 	cmd[cmd_i++] = strndup(tok, tok_i);
-	
-	if(isBuiltin(cmd[cmd_i-1])) 
-	  flags |= BUILTIN;
-
 	tok_i = 0;
       }
       break;
     
     case '#': case '<': case '>': case '&': case '|':
-      if(tok_i){ 	
+      if(tok_i) 	
 	cmd[cmd_i++] = strndup(tok, tok_i);
-	
-	if(isBuiltin(cmd[cmd_i-1])) 
-	  flags |= BUILTIN;	
-      }
+     
       //push special char
       tok[0] = *buf;
       cmd[cmd_i++] = strndup(tok, 1);
@@ -127,20 +118,15 @@ int parseExecCmd(char *buf) {
       break;
     
     case ';': case '\n':
-      if(tok_i) {
+      if(tok_i)
 	cmd[cmd_i++] = strndup(tok, tok_i);
-	
-	if(isBuiltin(cmd[cmd_i-1])) 
-	  flags |= BUILTIN;	
-      }
 
-      if (flags&SPECIAL)     
-	{}//ship to special
-      else if(flags&BUILTIN)
-	error += builtin(cmd, cmd_i);
-      else if(cmd_i)                 
+      if (flags&SPECIAL) {
+	special(cmd, cmd_i);
+      }
+      else if(cmd_i && !builtin(cmd, cmd_i)) {               
 	error += execute(cmd, cmd_i);
-      
+      }
       cmd_i = 0;
       tok_i = 0;
       break;
@@ -157,30 +143,12 @@ int parseExecCmd(char *buf) {
 }
 
 /** BUILTIN **/
-
-/*
- * Checks whether tok is a builtin 
- */
-int isBuiltin(token tok) {
-  //pre: tok is a valid token
-  //post: returns 1 if tok is a builtin, 0 otherwise
-  if(tok) {
-    if(!strcmp(tok, "cd")   || 
-       !strcmp(tok, "exit") ||
-       !strcmp(tok, "help") ||
-       !strcmp(tok, "jobs") ||
-       !strcmp(tok, "kill")) 
-      return 1;
-  }
-  return 0;
-}
-
 /*
  * Executes built-in commands as specified by tokens in command.
  */
 int builtin(token *command, int cmd_len) {
   //pre:  command contains valid builtin command
-  //post: return 0 command is executed, -1 otherwise
+  //post: return 1 if command is executed, 0 otherwise
   
   //first token is the command itself
   int cur = 0;
@@ -204,6 +172,56 @@ int builtin(token *command, int cmd_len) {
   }
   else {
     debugPrint("first token isn't a builtin\n");
+    return 0;
+  }
+  return 1;
+}
+
+/** SPECIAL **/
+/*
+ * Parses all special characters. Perhaps we should ship to helper functions?
+ */
+int special(token *command, int cmd_len) {
+  token args[256] = {0};
+  int args_i = 0;
+  int error = 0;
+  int src = dup(STDIN_FILENO);
+  int dst = dup(STDOUT_FILENO);
+  int file_descr;
+  mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
+  while(*command) {
+    if(!strcmp(*command, "#")) {
+      debugPrint("This is a comment.\n");
+    }
+    else if(!strcmp(*command, "&")) {
+      debugPrint("Your process isn't running in the background.\n");
+    }
+    else if(!strcmp(*command, "|")) {
+      debugPrint("PVC Pipe.\n");
+    }
+    else if(!strcmp(*command, "<")) {
+      file_descr = open(*(++command), O_RDONLY);
+      src = dup2(file_descr, src);
+    }
+    else if(!strcmp(*command, ">")) {
+      creat(*(++command), mode);
+      dst = dup2(file_descr, dst);
+    }
+    else {
+      args[args_i] = strdup(*command);
+      args_i++;
+    }
+    command++;
+  }
+  
+  if(args_i && !builtin(args, args_i)) {               
+    error += execute(args, args_i);
+  }
+
+  close(dst);
+  close(src);
+  
+  if(error) {
     return -1;
   }
   return 0;
