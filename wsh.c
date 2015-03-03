@@ -5,6 +5,7 @@
  * TODO:
  *    -exit [n] => exit with status N
  *    -special characters
+ *    -handle special cases of redirection (two carats in a row, etc)
  */
 
 #include <stdio.h>
@@ -185,8 +186,10 @@ int special(token *command, int cmd_len) {
   token args[256] = {0};
   int args_i = 0;
   int error = 0;
-  int src = dup(STDIN_FILENO);
-  int dst = dup(STDOUT_FILENO);
+  int stdin_copy = dup(STDIN_FILENO);
+  int stdout_copy = dup(STDOUT_FILENO);
+  int src = STDIN_FILENO;
+  int dst = STDOUT_FILENO;
   int file_descr;
   mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
   while(*command) {
@@ -204,7 +207,7 @@ int special(token *command, int cmd_len) {
       src = dup2(file_descr, src);
     }
     else if(!strcmp(*command, ">")) {
-      creat(*(++command), mode);
+      file_descr = creat(*(++command), mode);
       dst = dup2(file_descr, dst);
     }
     else {
@@ -218,8 +221,14 @@ int special(token *command, int cmd_len) {
     error += execute(args, args_i);
   }
 
+  //if(dst != STDOUT_FILENO) {
   close(dst);
-  close(src);
+  dst = dup2(stdout_copy, STDOUT_FILENO);
+    // }
+  //if(src != STDIN_FILENO) {
+    close(src);
+    src = dup2(stdin_copy, STDIN_FILENO);
+    //}
   
   if(error) {
     return -1;
