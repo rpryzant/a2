@@ -194,6 +194,7 @@ int special(token *command, int cmd_len) {
   mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
   while(*command) {
     if(!strcmp(*command, "#")) {
+      break;
       debugPrint("This is a comment.\n");
     }
     else if(!strcmp(*command, "&")) {
@@ -204,15 +205,16 @@ int special(token *command, int cmd_len) {
     }
     else if(!strcmp(*command, "<")) {
       file_descr = open(*(++command), O_RDONLY);
-      src = dup2(file_descr, src);
+      dup2(file_descr, src);
+      close(file_descr);
     }
     else if(!strcmp(*command, ">")) {
       file_descr = creat(*(++command), mode);
-      dst = dup2(file_descr, dst);
+      dup2(file_descr, dst);
+      close(file_descr);
     }
     else {
-      args[args_i] = strdup(*command);
-      args_i++;
+      args[args_i++] = strdup(*command);
     }
     command++;
   }
@@ -221,14 +223,12 @@ int special(token *command, int cmd_len) {
     error += execute(args, args_i);
   }
 
-  //if(dst != STDOUT_FILENO) {
   close(dst);
   dst = dup2(stdout_copy, STDOUT_FILENO);
-    // }
-  //if(src != STDIN_FILENO) {
-    close(src);
-    src = dup2(stdin_copy, STDIN_FILENO);
-    //}
+  
+  close(src);
+  src = dup2(stdin_copy, STDIN_FILENO);
+  
   
   if(error) {
     return -1;
