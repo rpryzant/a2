@@ -19,6 +19,12 @@
 #include "hash.h"
 
 typedef char* token;
+typedef struct pair pair;
+struct pair {
+  int pid;
+  int job_num;
+};
+
 
 static int debug = 1;
 
@@ -32,6 +38,8 @@ static int debug = 1;
 /* GLOBALS */
 static char *CUR_PATH;
 static hash EXEC_TABLE;
+static hash JOBS_TABLE;
+
 /* UTILITIES */
 static void init(void);
 static void initKind(void);
@@ -191,6 +199,10 @@ int special(token *command, int cmd_len) {
   int src = STDIN_FILENO;
   int dst = STDOUT_FILENO;
   int file_descr;
+  
+  int pipefd[2];
+  int piped = 0;
+
   mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
   while(*command) {
     if(!strcmp(*command, "#")) {
@@ -201,6 +213,8 @@ int special(token *command, int cmd_len) {
       debugPrint("Your process isn't running in the background.\n");
     }
     else if(!strcmp(*command, "|")) {
+      
+
       debugPrint("PVC Pipe.\n");
     }
     else if(!strcmp(*command, "<")) {
@@ -305,7 +319,7 @@ void initKind() {
   //post: allocate  a hash table to translate executable -> full path specification                      
   EXEC_TABLE = ht_alloc(997);                                                                          
   // get path:                                                                                        
-  char *path = getenv("PATH");  /* getenv(3) */
+  char *path = strdup(getenv("PATH"));  /* getenv(3) */
   char name[1024], basename[256];
   char *dirname;
   DIR *dir;
