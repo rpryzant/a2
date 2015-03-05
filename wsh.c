@@ -151,8 +151,10 @@ int parseExecCmd(char *buf) {
     }
     buf++;
   }
-  
-  checkJobs();
+
+  if(cq_size(JOBS_CIRQ)){
+    checkJobs();
+  }
 
   if (error) 
     return -1;
@@ -439,8 +441,7 @@ void checkJobs(void) {
   pair *head;
   pair *cur;
   
-  while((pid = waitpid(-1, &status, WNOHANG)) > 0) {
-    
+  while((pid = waitpid(-1, &status, WNOHANG))) {
     head = (pair *)cq_peek(JOBS_CIRQ);
     cq_rot(JOBS_CIRQ);
     while((cur = (pair *)cq_peek(JOBS_CIRQ)) != head) {
@@ -459,14 +460,14 @@ int main(int argc, char **argv) {
   init();
   char buf[BUFSIZ];
 
-  printf("%s%s%s$ ", ANSI_GREEN, CUR_PATH, ANSI_RESET);
+  fprintf(stdout, "%s%s%s$ ", ANSI_GREEN, CUR_PATH, ANSI_RESET);
 
   parseExecCmd("\n");
   
 
   while(buf == fgets(buf, BUFSIZ, stdin)) {
     parseExecCmd(buf);
-    printf("%s%s%s$ ", ANSI_GREEN, CUR_PATH, ANSI_RESET);
+    fprintf(stdout, "%s%s%s$ ", ANSI_GREEN, CUR_PATH, ANSI_RESET);
   }
   freeWsh();
 
