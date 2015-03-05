@@ -17,9 +17,11 @@
 #include <sys/wait.h>
 
 #include "hash.h"
+#include "cirq.h"
 
 typedef char* token;
 typedef struct pair pair;
+
 struct pair {
   int pid;
   int job_num;
@@ -34,11 +36,14 @@ static int debug = 1;
 #define SPECIAL      0b1
 #define BUILTIN      0b10
 
+#define BACKGROUND   1
+#define FOREGROUND   0
 
 /* GLOBALS */
 static char *CUR_PATH;
 static hash EXEC_TABLE;
-static hash JOBS_TABLE;
+static cirq JOBS_CIRQ;
+static int  JOB_NUM;
 
 /* UTILITIES */
 static void init(void);
@@ -46,7 +51,9 @@ static void initKind(void);
 static void freeWsh(void);
 static int  tokenizeString(char *, token *); //currently not in use
 static int  parseExecCmd(char *);
-static int  execute(token *command, int cmd_len);
+static int  execute(token *command, int cmd_len, int background);
+static void checkJobs(void);
+
 /* BUILTINS */
 static int  builtin(token *command, int cmd_len);
 static void help(token command);
@@ -95,7 +102,6 @@ int tokenizeString(char *buf, token*args) {
 int parseExecCmd(char *buf) {
   //pre: buf is a null terminated string
   //post: buf is tokenized and commands in buf executed.
-  //TODO: repeated builtin check is ugly...how to handle?
   int flags = 0;
   token cmd[256] = {0};
   char  tok[1024] = {0};
@@ -134,7 +140,7 @@ int parseExecCmd(char *buf) {
 	special(cmd, cmd_i);
       }
       else if(cmd_i && !builtin(cmd, cmd_i)) {               
-	error += execute(cmd, cmd_i);
+	error += execute(cmd, cmd_i, FOREGROUND);
       }
       cmd_i = 0;
       tok_i = 0;
@@ -145,6 +151,9 @@ int parseExecCmd(char *buf) {
     }
     buf++;
   }
+  
+  checkJobs();
+
   if (error) 
     return -1;
   else
@@ -194,10 +203,12 @@ int special(token *command, int cmd_len) {
   token args[256] = {0};
   int args_i = 0;
   int error = 0;
+
   int stdin_copy = dup(STDIN_FILENO);
   int stdout_copy = dup(STDOUT_FILENO);
   int src = STDIN_FILENO;
   int dst = STDOUT_FILENO;
+  
   int file_descr;
   
   int pipefd[2];
@@ -210,11 +221,13 @@ int special(token *command, int cmd_len) {
       debugPrint("This is a comment.\n");
     }
     else if(!strcmp(*command, "&")) {
+      if(args_i) {
+	execute(args, args_i, BACKGROUND);
+	args_i = 0;
+      }
       debugPrint("Your process isn't running in the background.\n");
     }
     else if(!strcmp(*command, "|")) {
-      
-
       debugPrint("PVC Pipe.\n");
     }
     else if(!strcmp(*command, "<")) {
@@ -234,7 +247,7 @@ int special(token *command, int cmd_len) {
   }
   
   if(args_i && !builtin(args, args_i)) {               
-    error += execute(args, args_i);
+    error += execute(args, args_i, FOREGROUND);
   }
 
   close(dst);
@@ -242,7 +255,6 @@ int special(token *command, int cmd_len) {
   
   close(src);
   src = dup2(stdin_copy, STDIN_FILENO);
-  
   
   if(error) {
     return -1;
@@ -307,8 +319,16 @@ void exitWsh() {
  * Builtin that lists all current jobs.
  */
 void jobs() {
-  //TODO
-  debugPrint("Tony's unemployed\n");
+  //post: lists all current jobs
+  pair *head;
+  pair *cur;
+
+  head = (pair *)cq_peek(JOBS_CIRQ);
+  cq_rot(JOBS_CIRQ);
+  while((cur = (pair *)cq_peek(JOBS_CIRQ)) != head) {
+    fprintf(stdout, "[%d]\tA process\t%d\n", cur->job_num, cur->pid);
+      cq_rot(JOBS_CIRQ);
+  }
 }
 
 /*
@@ -357,6 +377,8 @@ void initKind() {
  */
 void init() {
   CUR_PATH = getcwd(CUR_PATH, PATH_MAX);
+  JOBS_CIRQ = cq_alloc();
+  JOB_NUM = 0;
   initKind();
 }
 
@@ -368,15 +390,19 @@ void freeWsh() {
 }
 
 /* 
- * Execute a command.
+ * Execute a command, either in the background or in the foreground.
  */
-int execute(token *command, int cmd_len) {
+int execute(token *command, int cmd_len, int background) {
   //pre: command is a single command & argument list with no special characters.
   //post: the command is executed and status is returned.
   token first = *command;
   char *cmd_path;
   pid_t pid = vfork();
   int status;
+
+  //to tie off end of command
+  command[cmd_len] = NULL;
+
   // child process
   if (pid == 0) {
     cmd_path = ht_get(EXEC_TABLE, first);
@@ -389,11 +415,44 @@ int execute(token *command, int cmd_len) {
       exit(-1);
     }
   } 
-  // parent process
-  else {
+  // parent process, foreground
+  else if(!background){
     waitpid(pid, &status, 0);
   }
+  // parent process, background
+  else {
+    pair *p = (pair *)malloc(sizeof(pair));
+    p->pid = pid;
+    p->job_num = JOB_NUM++;
+    cq_enq(JOBS_CIRQ, p);
+    fprintf(stdout, "[%d] %d\n", p->job_num, p->pid);
+  }
   return status;  
+}
+/*
+ * Checks JOB_CIRQ for any jobs that have completed.
+ */
+void checkJobs(void) {
+  //post: newly completed jobs, if any, are printed to stdout
+  int pid;
+  int status;
+  pair *head;
+  pair *cur;
+  
+  while((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+    
+    head = (pair *)cq_peek(JOBS_CIRQ);
+    cq_rot(JOBS_CIRQ);
+    while((cur = (pair *)cq_peek(JOBS_CIRQ)) != head) {
+      if(cur->pid == pid) {
+	fprintf(stdout, "[%d]: finished\n", cur->job_num);
+	cq_deq(JOBS_CIRQ);
+	break;
+      }
+      cq_rot(JOBS_CIRQ);
+    }
+    
+  }
 }
 
 int main(int argc, char **argv) {
