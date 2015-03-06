@@ -322,14 +322,13 @@ void exitWsh() {
  */
 void jobs() {
   //post: lists all current jobs
-  pair *head;
+  int num_jobs = cq_size(JOBS_CIRQ);
   pair *cur;
 
-  head = (pair *)cq_peek(JOBS_CIRQ);
-  cq_rot(JOBS_CIRQ);
-  while((cur = (pair *)cq_peek(JOBS_CIRQ)) != head) {
+  while(num_jobs--) {
+    cur = (pair *)cq_peek(JOBS_CIRQ);
     fprintf(stdout, "[%d]\tA process\t%d\n", cur->job_num, cur->pid);
-      cq_rot(JOBS_CIRQ);
+    cq_rot(JOBS_CIRQ);
   }
 }
 
@@ -437,14 +436,14 @@ int execute(token *command, int cmd_len, int background) {
 void checkJobs(void) {
   //post: newly completed jobs, if any, are printed to stdout
   int pid;
-  int status;
-  pair *head;
+  int num_jobs;
   pair *cur;
   
-  while((pid = waitpid(-1, &status, WNOHANG))) {
-    head = (pair *)cq_peek(JOBS_CIRQ);
-    cq_rot(JOBS_CIRQ);
-    while((cur = (pair *)cq_peek(JOBS_CIRQ)) != head) {
+  while((num_jobs = cq_size(JOBS_CIRQ)) && (pid = waitpid(-1, NULL, WNOHANG))) {
+
+    while(num_jobs--) {
+      cur = (pair *)cq_peek(JOBS_CIRQ);
+      
       if(cur->pid == pid) {
 	fprintf(stdout, "[%d]: finished\n", cur->job_num);
 	cq_deq(JOBS_CIRQ);
