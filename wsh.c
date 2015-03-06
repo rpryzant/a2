@@ -5,7 +5,7 @@
  * TODO:
  *    -exit [n] => exit with status N
  *    -special characters
- *    -handle special cases of redirection (two carats in a row, etc)
+ *    -cd needs to modify PATH so that we can execute executables in directories
  */
 
 #include <stdio.h>
@@ -61,6 +61,7 @@ static void help(token command);
 static void cd(token path);
 static void jobs(void);
 static void exitWsh(void);
+static void killCmd(token job_num);
 /* SPECIALS */
 static int special(token *command, int cmd_len);
 /*
@@ -163,6 +164,9 @@ int parseExecCmd(char *buf) {
     return 0;
 }
 
+
+
+
 /** BUILTIN **/
 /*
  * Executes built-in commands as specified by tokens in command.
@@ -189,6 +193,7 @@ int builtin(token *command, int cmd_len) {
     jobs();
   }
   else if(!strcmp(first, "kill")) {
+    killCmd(command[cur++]);
     debugPrint("Die! Die!\n");
   }
   else {
@@ -313,7 +318,14 @@ void help(token command) {
  * Stops all processes managed by wsh and exits normally.
  */
 void exitWsh() {
-  //TODO: eventually kill all tasks, or warn users tasks are still running
+  int size = cq_size(JOBS_CIRQ);
+  job *cur;
+  while(size--) {
+    cur = (job *)cq_peek(JOBS_CIRQ);
+    kill(cur->pid, SIGINT);
+    cq_rot(JOBS_CIRQ);
+  }
+  
   exit(0);
 }
 
@@ -330,6 +342,26 @@ void jobs() {
     fprintf(stdout, "[%d] %s%d\n", cur->jid, cur->name, cur->pid);
     cq_rot(JOBS_CIRQ);
   }
+}
+/*
+ * Kills command specified by job_num
+ * 
+ */
+void killCmd(token job_num) {
+  //pre: job_num is a valid job number
+  //post: kills job_num process, if it exists
+  int size = cq_size(JOBS_CIRQ);
+  job *cur;
+  while(size--) {
+    cur = (job *)cq_peek(JOBS_CIRQ);
+    if(cur->jid == atoi(job_num)) {
+      kill(cur->pid, SIGINT);
+      return;
+    }
+    cq_rot(JOBS_CIRQ);
+  }
+  
+  fprintf(stdout,"No such process\n");
 }
 
 /*
