@@ -20,11 +20,12 @@
 #include "cirq.h"
 
 typedef char* token;
-typedef struct pair pair;
+typedef struct job job;
 
-struct pair {
+struct job {
   int pid;
-  int job_num;
+  int jid;
+  char *name;
 };
 
 
@@ -227,7 +228,6 @@ int special(token *command, int cmd_len) {
 	execute(args, args_i, BACKGROUND);
 	args_i = 0;
       }
-      debugPrint("Your process isn't running in the background.\n");
     }
     else if(!strcmp(*command, "|")) {
       debugPrint("PVC Pipe.\n");
@@ -323,11 +323,11 @@ void exitWsh() {
 void jobs() {
   //post: lists all current jobs
   int num_jobs = cq_size(JOBS_CIRQ);
-  pair *cur;
+  job *cur;
 
   while(num_jobs--) {
-    cur = (pair *)cq_peek(JOBS_CIRQ);
-    fprintf(stdout, "[%d]\tA process\t%d\n", cur->job_num, cur->pid);
+    cur = (job *)cq_peek(JOBS_CIRQ);
+    fprintf(stdout, "[%d] %s%d\n", cur->jid, cur->name, cur->pid);
     cq_rot(JOBS_CIRQ);
   }
 }
@@ -422,11 +422,26 @@ int execute(token *command, int cmd_len, int background) {
   }
   // parent process, background
   else {
-    pair *p = (pair *)malloc(sizeof(pair));
+    job *p = (job *)malloc(sizeof(job));
     p->pid = pid;
-    p->job_num = JOB_NUM++;
+    p->jid = JOB_NUM++;
+    
+    //UGLY
+    int i;
+    int buflen = 0;
+    for(i = 0; i < cmd_len; i++) {
+      buflen += strlen(command[i])+1;
+    }
+    char *name = (char *)malloc(buflen);
+    char *space = " ";
+    for(i = 0; i < cmd_len; i++) {
+      strcat(name, command[i]);
+      strcat(name, space);
+    }
+    p->name = name;
+
     cq_enq(JOBS_CIRQ, p);
-    fprintf(stdout, "[%d] %d\n", p->job_num, p->pid);
+    fprintf(stdout, "[%d] %d\n", p->jid, p->pid);
   }
   return status;  
 }
@@ -437,16 +452,19 @@ void checkJobs(void) {
   //post: newly completed jobs, if any, are printed to stdout
   int pid;
   int num_jobs;
-  pair *cur;
+  job *cur;
   
   while((num_jobs = cq_size(JOBS_CIRQ)) && (pid = waitpid(-1, NULL, WNOHANG))) {
 
     while(num_jobs--) {
-      cur = (pair *)cq_peek(JOBS_CIRQ);
+      cur = (job *)cq_peek(JOBS_CIRQ);
       
       if(cur->pid == pid) {
-	fprintf(stdout, "[%d]: finished\n", cur->job_num);
+	fprintf(stdout, "[%d]: finished %s\n", cur->jid, cur->name);
+
 	cq_deq(JOBS_CIRQ);
+	free(cur->name);
+	free(cur);
 	break;
       }
       cq_rot(JOBS_CIRQ);
@@ -460,9 +478,6 @@ int main(int argc, char **argv) {
   char buf[BUFSIZ];
 
   fprintf(stdout, "%s%s%s$ ", ANSI_GREEN, CUR_PATH, ANSI_RESET);
-
-  parseExecCmd("\n");
-  
 
   while(buf == fgets(buf, BUFSIZ, stdin)) {
     parseExecCmd(buf);
