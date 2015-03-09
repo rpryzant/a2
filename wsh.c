@@ -5,6 +5,8 @@
  * TODO:
  *    -DEBUGGINGGGGGG
  *        -ls ;   => ls: cannot access : No such file or directory
+ *        -ctl-d  => segfault (we may not have to do anything?)
+ *        -kill not working?
  *    -exit [n] => exit with status N
  */
 
@@ -52,19 +54,19 @@ static cirq PIPE_CIRQ;
 static void init(void);
 static void freeWsh(void);
 static int  parseExecCmd(char *);
-static int  execute(token *command, int cmd_len, int background);
+static int  execute(token *command, int background);
 static void checkJobs(void);
 static void catchSIGINT(int);
 
 /* BUILTINS */
-static int  builtin(token *command, int cmd_len);
+static int  builtin(token *command);
 static void help(token command);
 static void cd(token path);
 static void jobs(void);
 static void exitWsh(void);
 static void killCmd(token job_num);
 /* SPECIALS */
-static int special(token *command, int cmd_len);
+static int special(token *command);
 static void checkPipes(void);
 /*
  * Break args into valid commands.
@@ -76,7 +78,7 @@ int parseExecCmd(char *buf) {
   //pre: buf is a null terminated string
   //post: buf is tokenized and commands in buf executed.
   int flags = 0;
-  vec v = v_alloc();
+  vec cmd = v_alloc();
   char tok[1024] = {0};
   int tok_i = 0;
   int error;
@@ -88,33 +90,33 @@ int parseExecCmd(char *buf) {
     switch(*buf) {
     case ' ':
       if(tok_i) {
-	v_add(v, strndup(tok, tok_i));
+	v_add(cmd, strndup(tok, tok_i));
 	tok_i = 0;
       }
       break;
     
     case '#': case '<': case '>': case '&': case '|':
       if(tok_i) 	
-	v_add(v, strndup(tok, tok_i));
+	v_add(cmd, strndup(tok, tok_i));
      
       //push special char
       tok[0] = *buf;
-      v_add(v, strndup(tok, 1));
+      v_add(cmd, strndup(tok, 1));
       tok_i = 0;
       flags |= SPECIAL;
       break;
     
     case ';': case '\n':
       if(tok_i)
-	v_add(v, strndup(tok, tok_i));
+	v_add(cmd, strndup(tok, tok_i));
 
       if (flags&SPECIAL) {
-	special((char **)v_data(v), v_size(v));
+	special((token *)v_data(cmd));
       }
-      else if(v_size(v) && !builtin((char **)v_data(v), v_size(v))) {               
-	error += execute((char **)v_data(v), v_size(v), FOREGROUND);
+      else if(v_size(cmd) && !builtin((token *)v_data(cmd))) {               
+	error += execute((token *)v_data(cmd), FOREGROUND);
       }
-      v_reset(v);
+      v_reset(cmd);
       tok_i = 0;
       break;
     
@@ -139,7 +141,7 @@ int parseExecCmd(char *buf) {
 /*
  * Executes built-in commands as specified by tokens in command.
  */
-int builtin(token *command, int cmd_len) {
+int builtin(token *command) {
   //pre:  command contains valid builtin command
   //post: return 1 if command is executed, 0 otherwise
   
@@ -154,8 +156,7 @@ int builtin(token *command, int cmd_len) {
     exitWsh();
   }
   else if(!strcmp(first, "help")) {
-    if(cmd_len == 1) help(NULL);
-    else             help(command[cur++]);
+    help(command[cur++]);
   }
   else if(!strcmp(first, "jobs")) {
     jobs();
@@ -175,9 +176,8 @@ int builtin(token *command, int cmd_len) {
 /*
  * Parses all special characters. Perhaps we should ship to helper functions?
  */
-int special(token *command, int cmd_len) {
-  token args[256] = {0};
-  int args_i = 0;
+int special(token *command) {
+  vec args = v_alloc();
   int error = 0;
 
   int stdin_copy = dup(STDIN_FILENO);
@@ -195,9 +195,9 @@ int special(token *command, int cmd_len) {
       debugPrint("This is a comment.\n");
     }
     else if(!strcmp(*command, "&")) {
-      if(args_i) {
-	execute(args, args_i, BACKGROUND);
-	args_i = 0;
+      if(v_size(args)) {
+	execute((token *)v_data(args), BACKGROUND);
+	v_reset(args);
       }
     }
     else if(!strcmp(*command, "|")) {
@@ -205,13 +205,13 @@ int special(token *command, int cmd_len) {
       pipe(pipefd);
       dup2(pipefd[1], dst);
       
-      if(args_i && !builtin(args, args_i))               
-	error += execute(args, args_i, PIPE);
+      if(v_size(args) && !builtin((token *)v_data(args)))               
+	 error += execute((token *)v_data(args), PIPE);
       
       close(pipefd[1]);
       dup2(stdout_copy, dst);
 
-      args_i = 0;
+      v_reset(args);
       dup2(pipefd[0], src);
       close(pipefd[0]);
     }
@@ -226,13 +226,13 @@ int special(token *command, int cmd_len) {
       close(file_descr);
     }
     else {
-      args[args_i++] = strdup(*command);
+      v_add(args, strdup(*command));
     }
     command++;
   }
   
-  if(args_i && !builtin(args, args_i)) {               
-    error += execute(args, args_i, FOREGROUND);
+  if(v_size(args) && !builtin((token *)v_data(args))) {               
+    error += execute((token *)v_data(args), FOREGROUND);
   }
 
   close(dst);
@@ -241,9 +241,6 @@ int special(token *command, int cmd_len) {
   close(src);
   src = dup2(stdin_copy, STDIN_FILENO);
   
-
-
-
   if(error) {
     return -1;
   }
@@ -399,15 +396,12 @@ void freeWsh() {
 /* 
  * Execute a command, either in background context, foreground context, or pipe context.
  */
-int execute(token *command, int cmd_len, int context) {
+int execute(token *command, int context) {
   //pre: command is a single command & argument list with no special characters.
   //post: the command is executed and status is returned.
   token first = *command;
   pid_t pid = vfork();
   int status;
-
-  //to tie off end of command
-  command[cmd_len] = NULL;
 
   // child process
   if (pid == 0) {
@@ -427,14 +421,16 @@ int execute(token *command, int cmd_len, int context) {
     p->jid = JOB_NUM++;
     
     //UGLY
-    int i;
+    int i = 0;
     int buflen = 0;
-    for(i = 0; i < cmd_len; i++) {
-      buflen += strlen(command[i])+1;
-    }
+    while(command[i])
+      buflen += strlen(command[i++])+1;
+
     char *name = (char *)malloc(buflen);
-    for(i = 0; i < cmd_len; i++) {
-      strcat(name, command[i]);
+    
+    i = 0;
+    while(command[i]) {
+      strcat(name, command[i++]);
       strcat(name, " ");
     }
     p->name = name;
