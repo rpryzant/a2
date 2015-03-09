@@ -4,8 +4,7 @@
  * 
  * TODO:
  *    -exit [n] => exit with status N
- *    -special characters
- *    -cd needs to modify PATH so that we can execute executables in directories
+ *    -segfaults on exit when invalid command attempted
  */
 
 #include <stdio.h>
@@ -21,14 +20,14 @@
 
 typedef char* token;
 typedef struct job job;
-
+//typedef struct sigaction sigaction;
 struct job {
   int pid;
   int jid;
   char *name;
 };
 
-
+//toggles debugPrints on and off
 static int debug = 1;
 
 #define debugPrint if (debug) printf
@@ -43,7 +42,6 @@ static int debug = 1;
 
 /* GLOBALS */
 static char *CUR_PATH;
-static hash EXEC_TABLE;
 static cirq JOBS_CIRQ;
 static int  JOB_NUM;
 
@@ -51,12 +49,12 @@ static cirq PIPE_CIRQ;
 
 /* UTILITIES */
 static void init(void);
-static void initKind(void);
 static void freeWsh(void);
 static int  tokenizeString(char *, token *); //currently not in use
 static int  parseExecCmd(char *);
 static int  execute(token *command, int cmd_len, int background);
-static void  checkJobs(void);
+static void checkJobs(void);
+static void catchSIGINT(int);
 
 /* BUILTINS */
 static int  builtin(token *command, int cmd_len);
@@ -304,6 +302,10 @@ void checkPipes() {
   }
 }
 
+void catchSIGINT(int signo) {
+  debugPrint("User tried to ctl-c! Signal #: %d\n", signo);
+}
+
 /*
  * changes the current working directory to specified path
  */
@@ -314,7 +316,7 @@ void cd(token path) {
     CUR_PATH = getcwd(CUR_PATH, PATH_MAX);
   } 
   else { 
-    debugPrint("cd: %s: No such file or directory.\n", path);
+    fprintf(stdout, "cd: %s: No such file or directory.\n", path);
   }
 }
 
@@ -400,47 +402,6 @@ void killCmd(token job_num) {
 }
 
 /*
- * Initializes excecutable commands. 
- */
-void initKind() {
-  //pre: None
-  //post: allocate  a hash table to translate executable -> full path specification                      
-  EXEC_TABLE = ht_alloc(997);                                                                          
-  // get path:                                                                                        
-  char *path = strdup(getenv("PATH"));  /* getenv(3) */
-  char name[1024], basename[256];
-  char *dirname;
-  DIR *dir;
-  // split path members                                                                               
-  while ((dirname = strsep(&path,":"))) { /* strsep(3) */
-    // open directory file                                                                            
-    dir = opendir(dirname);               /* opendir(3) */
-    if (dir) {
-      struct dirent *de;        /* dirent(5) */
-      while ((de = readdir(dir))) { /* readdir(3) */
-        int type = de->d_type;
-        // check regular files....                                                                    
-        if (type & DT_REG) {
-          strcpy(name,dirname); /* strcpy(3) */
-          strcat(name,"/");     /* strcat(3) */
-          strcpy(basename,de->d_name);
-          strcat(name,basename);
-          // ...that are executable                                                                   
-          if (0 == access(name,X_OK)) { /* access(2) */
-            // add to database if they've not been encountered before                                 
-            if (!ht_get(EXEC_TABLE,basename)) {
-              // enter into table, but:                                                               
-              // make copies of key and value to void poisoning                                       
-              ht_put(EXEC_TABLE,strdup(basename),strdup(name)); /* strdup(3) */
-            }
-          }
-        }
-      }
-    }
-  }
-}
-
-/*
  * Initializes global vars
  */
 void init() {
@@ -448,14 +409,22 @@ void init() {
   JOBS_CIRQ = cq_alloc();
   PIPE_CIRQ = cq_alloc();
   JOB_NUM = 0;
-  initKind();
+  
+  struct sigaction *act = (struct sigaction *)calloc(sizeof(struct sigaction),1);
+  act->sa_handler = SIG_IGN;//catchSIGINT;
+  
+  if(signal(SIGINT, catchSIGINT) < 0) {
+    // if (sigaction(SIGINT, act, NULL) < 0) {
+    debugPrint("Error initializing SIGINT handler.\n");
+  }
 }
 
 /*
  * Frees all allocated memory associated with Wsh.
  */
 void freeWsh() {
-  ht_free(EXEC_TABLE);
+  cq_free(JOBS_CIRQ);
+  cq_free(PIPE_CIRQ);
 }
 
 /* 
@@ -465,7 +434,6 @@ int execute(token *command, int cmd_len, int context) {
   //pre: command is a single command & argument list with no special characters.
   //post: the command is executed and status is returned.
   token first = *command;
-  char *cmd_path;
   pid_t pid = vfork();
   int status;
 
@@ -474,11 +442,9 @@ int execute(token *command, int cmd_len, int context) {
 
   // child process
   if (pid == 0) {
-    cmd_path = ht_get(EXEC_TABLE, first);
-    if(cmd_path) {
-      if(cmd_len)
-	execv(cmd_path, command);
-    }
+    if(cmd_len)
+      execvp(first, command);
+
     else {
       fprintf(stdout, "%s: Command not found\n", first);
       exit(-1);
