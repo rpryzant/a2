@@ -5,6 +5,7 @@
  * TODO:
  *    -exit [n] => exit with status N
  *    -segfaults on exit when invalid command attempted
+ *    -"ls | sadf" runs an infinite loop
  */
 
 #include <stdio.h>
