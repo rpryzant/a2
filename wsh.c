@@ -4,8 +4,6 @@
  * 
  * TODO:
  *    -exit [n] => exit with status N
- *    -segfaults on exit when invalid command attempted
- *    -"ls | sadf" runs an infinite loop
  */
 
 #include <stdio.h>
@@ -51,7 +49,7 @@ static cirq PIPE_CIRQ;
 /* UTILITIES */
 static void init(void);
 static void freeWsh(void);
-static int  tokenizeString(char *, token *); //currently not in use
+//static int  tokenizeString(char *, token *); //currently not in use
 static int  parseExecCmd(char *);
 static int  execute(token *command, int cmd_len, int background);
 static void checkJobs(void);
@@ -67,10 +65,9 @@ static void killCmd(token job_num);
 /* SPECIALS */
 static int special(token *command, int cmd_len);
 static void checkPipes(void);
-
 /*
  * Break a string (buf) into tokens (placed in args)
- */
+
 int tokenizeString(char *buf, token*args) {
   // pre:  -buf is a valid null-terminated string
   // post: -args is filled with pointers to tokens 
@@ -99,6 +96,7 @@ int tokenizeString(char *buf, token*args) {
   }
   return args_i;
 }
+*/
 /*
  * Break args into valid commands.
  * Here we should also send appropriate flags to push the commmand to the
@@ -167,8 +165,6 @@ int parseExecCmd(char *buf) {
   else
     return 0;
 }
-
-
 
 
 /** BUILTIN **/
@@ -277,13 +273,17 @@ int special(token *command, int cmd_len) {
   close(src);
   src = dup2(stdin_copy, STDIN_FILENO);
   
-  //don't return until pipe children are completed
-  checkPipes();
+
+
 
   if(error) {
     return -1;
   }
-  return 0;
+  else {
+    //don't return until pipe children are completed
+    checkPipes();
+    return 0;
+  }
 }
 
 /*
@@ -311,8 +311,9 @@ void catchSIGINT(int signo) {
  * changes the current working directory to specified path
  */
 void cd(token path) {
-  if (!path) 
-    path = "/";
+  if (!path) {
+    path = getenv("HOME");
+  }
   if (!chdir(path)) {
     CUR_PATH = getcwd(CUR_PATH, PATH_MAX);
   } 
@@ -443,13 +444,10 @@ int execute(token *command, int cmd_len, int context) {
 
   // child process
   if (pid == 0) {
-    if(cmd_len)
-      execvp(first, command);
-
-    else {
-      fprintf(stdout, "%s: Command not found\n", first);
-      exit(-1);
-    }
+    execvp(first, command);
+    //falls to here if execvp returns with error
+    fprintf(stdout, "%s: Command not found\n", first);
+    exit(-1);  
   } 
   // parent process, foreground
   else if(context == FOREGROUND){
