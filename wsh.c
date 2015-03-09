@@ -37,6 +37,7 @@ static int debug = 1;
 #define SPECIAL      0b1
 #define BUILTIN      0b10
 
+#define PIPE         2
 #define BACKGROUND   1
 #define FOREGROUND   0
 
@@ -46,6 +47,8 @@ static hash EXEC_TABLE;
 static cirq JOBS_CIRQ;
 static int  JOB_NUM;
 
+static cirq PIPE_CIRQ;
+
 /* UTILITIES */
 static void init(void);
 static void initKind(void);
@@ -53,7 +56,7 @@ static void freeWsh(void);
 static int  tokenizeString(char *, token *); //currently not in use
 static int  parseExecCmd(char *);
 static int  execute(token *command, int cmd_len, int background);
-static void checkJobs(void);
+static void  checkJobs(void);
 
 /* BUILTINS */
 static int  builtin(token *command, int cmd_len);
@@ -64,6 +67,8 @@ static void exitWsh(void);
 static void killCmd(token job_num);
 /* SPECIALS */
 static int special(token *command, int cmd_len);
+static void checkPipes(void);
+
 /*
  * Break a string (buf) into tokens (placed in args)
  */
@@ -217,10 +222,8 @@ int special(token *command, int cmd_len) {
   int src = STDIN_FILENO;
   int dst = STDOUT_FILENO;
   
-  int file_descr;
-  
+  int file_descr;  
   int pipefd[2];
-  int piped = 0;
 
   mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
   while(*command) {
@@ -235,7 +238,19 @@ int special(token *command, int cmd_len) {
       }
     }
     else if(!strcmp(*command, "|")) {
-      debugPrint("PVC Pipe.\n");
+      
+      pipe(pipefd);
+      dup2(pipefd[1], dst);
+      
+      if(args_i && !builtin(args, args_i))               
+	error += execute(args, args_i, PIPE);
+      
+      close(pipefd[1]);
+      dup2(stdout_copy, dst);
+
+      args_i = 0;
+      dup2(pipefd[0], src);
+      close(pipefd[0]);
     }
     else if(!strcmp(*command, "<")) {
       file_descr = open(*(++command), O_RDONLY);
@@ -263,10 +278,30 @@ int special(token *command, int cmd_len) {
   close(src);
   src = dup2(stdin_copy, STDIN_FILENO);
   
+  //don't return until pipe children are completed
+  checkPipes();
+
   if(error) {
     return -1;
   }
   return 0;
+}
+
+/*
+ * Checks whether all child processes for a pipe command have completed
+ */
+void checkPipes() {
+  //post: returns when all children have completed
+  pid_t *cur;
+
+  while(cq_size(PIPE_CIRQ)) {
+    cur = (pid_t *)cq_peek(PIPE_CIRQ);
+    if(waitpid(*cur, NULL, WNOHANG) == *cur) {
+      cq_deq(PIPE_CIRQ);
+      free(cur);
+    }
+    cq_rot(JOBS_CIRQ);
+  }
 }
 
 /*
@@ -411,6 +446,7 @@ void initKind() {
 void init() {
   CUR_PATH = getcwd(CUR_PATH, PATH_MAX);
   JOBS_CIRQ = cq_alloc();
+  PIPE_CIRQ = cq_alloc();
   JOB_NUM = 0;
   initKind();
 }
@@ -423,9 +459,9 @@ void freeWsh() {
 }
 
 /* 
- * Execute a command, either in the background or in the foreground.
+ * Execute a command, either in background context, foreground context, or pipe context.
  */
-int execute(token *command, int cmd_len, int background) {
+int execute(token *command, int cmd_len, int context) {
   //pre: command is a single command & argument list with no special characters.
   //post: the command is executed and status is returned.
   token first = *command;
@@ -449,11 +485,11 @@ int execute(token *command, int cmd_len, int background) {
     }
   } 
   // parent process, foreground
-  else if(!background){
+  else if(context == FOREGROUND){
     waitpid(pid, &status, 0);
   }
   // parent process, background
-  else {
+  else if(context == BACKGROUND){
     job *p = (job *)malloc(sizeof(job));
     p->pid = pid;
     p->jid = JOB_NUM++;
@@ -465,16 +501,21 @@ int execute(token *command, int cmd_len, int background) {
       buflen += strlen(command[i])+1;
     }
     char *name = (char *)malloc(buflen);
-    char *space = " ";
     for(i = 0; i < cmd_len; i++) {
       strcat(name, command[i]);
-      strcat(name, space);
+      strcat(name, " ");
     }
     p->name = name;
 
     cq_enq(JOBS_CIRQ, p);
     fprintf(stdout, "[%d] %d\n", p->jid, p->pid);
   }
+  else if(context == PIPE) {
+    pid_t *p = (pid_t *)malloc(sizeof(pid_t));
+    *p = pid;
+    cq_enq(PIPE_CIRQ, p);
+  }
+
   return status;  
 }
 /*
