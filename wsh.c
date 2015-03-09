@@ -3,6 +3,7 @@
  * (c) 2015 Tony Liu and Reid Pryzant.
  * 
  * TODO:
+ *    -DEBUGGINGGGGGG
  *    -exit [n] => exit with status N
  */
 
@@ -19,7 +20,6 @@
 
 typedef char* token;
 typedef struct job job;
-//typedef struct sigaction sigaction;
 struct job {
   int pid;
   int jid;
@@ -40,16 +40,15 @@ static int debug = 1;
 #define FOREGROUND   0
 
 /* GLOBALS */
+static int  INT_FLAG; //if interrupt has been sent to us
 static char *CUR_PATH;
 static cirq JOBS_CIRQ;
 static int  JOB_NUM;
-
 static cirq PIPE_CIRQ;
 
 /* UTILITIES */
 static void init(void);
 static void freeWsh(void);
-//static int  tokenizeString(char *, token *); //currently not in use
 static int  parseExecCmd(char *);
 static int  execute(token *command, int cmd_len, int background);
 static void checkJobs(void);
@@ -65,38 +64,6 @@ static void killCmd(token job_num);
 /* SPECIALS */
 static int special(token *command, int cmd_len);
 static void checkPipes(void);
-/*
- * Break a string (buf) into tokens (placed in args)
-
-int tokenizeString(char *buf, token*args) {
-  // pre:  -buf is a valid null-terminated string
-  // post: -args is filled with pointers to tokens 
-  //       -the number of tokens is returned.
-  int args_i;
-  char *cur = buf;
-  int tok_len = 0;
-  args_i = 0;
-  while(*cur != '\0') {
-    tok_len = strcspn(cur, "\n#;&|<> ");
-    if(tok_len) {
-      args[args_i] = strndup(cur, tok_len);
-      args_i++;
-    }
-    cur += tok_len;
-
-    if(strspn(cur, ";\n")) {
-      //ship off args, args can now be overwritten
-      
-    }
-    else if(strspn(cur, "#&|<>")){
-      args[args_i] = strndup(cur, 1);
-      args_i++;
-    }
-    cur++;
-  }
-  return args_i;
-}
-*/
 /*
  * Break args into valid commands.
  * Here we should also send appropriate flags to push the commmand to the
@@ -304,7 +271,10 @@ void checkPipes() {
 }
 
 void catchSIGINT(int signo) {
-  debugPrint("User tried to ctl-c! Signal #: %d\n", signo);
+  //debugPrint("User tried to ctl-c! Signal #: %d", signo);
+  INT_FLAG = 1;
+  fprintf(stdout,"\n%s%s%s$ ", ANSI_GREEN, CUR_PATH, ANSI_RESET);
+  fflush(stdout);
 }
 
 /*
@@ -354,7 +324,7 @@ void help(token command) {
 }
 
 /*
- * Stops all processes managed by wsh and exits normally.
+ * Stops all processes managed by wsh and exits normally; cleans up all wsh mem used.
  */
 void exitWsh() {
   int size = cq_size(JOBS_CIRQ);
@@ -364,7 +334,7 @@ void exitWsh() {
     kill(cur->pid, SIGINT);
     cq_rot(JOBS_CIRQ);
   }
-  
+  freeWsh();
   exit(0);
 }
 
@@ -412,11 +382,7 @@ void init() {
   PIPE_CIRQ = cq_alloc();
   JOB_NUM = 0;
   
-  struct sigaction *act = (struct sigaction *)calloc(sizeof(struct sigaction),1);
-  act->sa_handler = SIG_IGN;//catchSIGINT;
-  
   if(signal(SIGINT, catchSIGINT) < 0) {
-    // if (sigaction(SIGINT, act, NULL) < 0) {
     debugPrint("Error initializing SIGINT handler.\n");
   }
 }
@@ -518,10 +484,15 @@ int main(int argc, char **argv) {
   fprintf(stdout, "%s%s%s$ ", ANSI_GREEN, CUR_PATH, ANSI_RESET);
 
   while(buf == fgets(buf, BUFSIZ, stdin)) {
+    INT_FLAG = 0;
     parseExecCmd(buf);
-    fprintf(stdout, "%s%s%s$ ", ANSI_GREEN, CUR_PATH, ANSI_RESET);
-  }
-  freeWsh();
+    if(!INT_FLAG) {
+      fprintf(stdout, "%s%s%s$ ", ANSI_GREEN, CUR_PATH, ANSI_RESET);
+    }
 
+  }
+
+  freeWsh();
+  exitWsh();
   return 0;
 }
