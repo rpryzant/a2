@@ -4,6 +4,7 @@
  * 
  * TODO:
  *    -DEBUGGINGGGGGG
+ *        -ls ;   => ls: cannot access : No such file or directory
  *    -exit [n] => exit with status N
  */
 
@@ -17,6 +18,7 @@
 
 #include "hash.h"
 #include "cirq.h"
+#include "vec.h"
 
 typedef char* token;
 typedef struct job job;
@@ -74,9 +76,8 @@ int parseExecCmd(char *buf) {
   //pre: buf is a null terminated string
   //post: buf is tokenized and commands in buf executed.
   int flags = 0;
-  token cmd[256] = {0};
-  char  tok[1024] = {0};
-  int cmd_i = 0;
+  vec v = v_alloc();
+  char tok[1024] = {0};
   int tok_i = 0;
   int error;
 
@@ -87,33 +88,33 @@ int parseExecCmd(char *buf) {
     switch(*buf) {
     case ' ':
       if(tok_i) {
-	cmd[cmd_i++] = strndup(tok, tok_i);
+	v_add(v, strndup(tok, tok_i));
 	tok_i = 0;
       }
       break;
     
     case '#': case '<': case '>': case '&': case '|':
       if(tok_i) 	
-	cmd[cmd_i++] = strndup(tok, tok_i);
+	v_add(v, strndup(tok, tok_i));
      
       //push special char
       tok[0] = *buf;
-      cmd[cmd_i++] = strndup(tok, 1);
+      v_add(v, strndup(tok, 1));
       tok_i = 0;
       flags |= SPECIAL;
       break;
     
     case ';': case '\n':
       if(tok_i)
-	cmd[cmd_i++] = strndup(tok, tok_i);
+	v_add(v, strndup(tok, tok_i));
 
       if (flags&SPECIAL) {
-	special(cmd, cmd_i);
+	special((char **)v_data(v), v_size(v));
       }
-      else if(cmd_i && !builtin(cmd, cmd_i)) {               
-	error += execute(cmd, cmd_i, FOREGROUND);
+      else if(v_size(v) && !builtin((char **)v_data(v), v_size(v))) {               
+	error += execute((char **)v_data(v), v_size(v), FOREGROUND);
       }
-      cmd_i = 0;
+      v_reset(v);
       tok_i = 0;
       break;
     
