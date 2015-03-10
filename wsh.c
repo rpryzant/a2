@@ -126,6 +126,8 @@ int parseExecCmd(char *buf) {
     buf++;
   }
 
+  v_free(cmd);
+
   if(cq_size(JOBS_CIRQ)){
     checkJobs();
   }
@@ -241,6 +243,8 @@ int special(token *command) {
   close(src);
   src = dup2(stdin_copy, STDIN_FILENO);
   
+  v_free(args);
+
   if(error) {
     return -1;
   }
