@@ -187,6 +187,7 @@ int special(token *command) {
   int pipefd[2];
 
   mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
+
   while(*command) {
     if(!strcmp(*command, "#")) {
       break;
@@ -214,8 +215,13 @@ int special(token *command) {
     }
     else if(!strcmp(*command, "<")) {
       file_descr = open(*(++command), O_RDONLY);
-      dup2(file_descr, src);
-      close(file_descr);
+      if(file_descr == -1) {
+	fprintf(stdout, "Wsh: %s: No such file or directory\n", *command);
+      }
+      else{
+	dup2(file_descr, src);
+	close(file_descr);
+      }
     }
     else if(!strcmp(*command, ">")) {
       file_descr = creat(*(++command), mode);
