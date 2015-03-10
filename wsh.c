@@ -4,11 +4,7 @@
  * 
  * TODO:
  *    -DEBUGGINGGGGGG
- *        -ls ;   => ls: cannot access : No such file or directory
- *        -ctl-d  => segfault (we may not have to do anything?)
- *        -kill not working?
- *    -exit [n] => exit with status N
- */
+  */
 
 #include <stdio.h>
 #include <string.h>
@@ -18,7 +14,6 @@
 #include <fcntl.h>
 #include <sys/wait.h>
 
-#include "hash.h"
 #include "cirq.h"
 #include "vec.h"
 
@@ -31,7 +26,7 @@ struct job {
 };
 
 //toggles debugPrints on and off
-static int debug = 1;
+static int debug = 0;
 
 #define debugPrint if (debug) printf
 #define ANSI_GREEN   "\x1b[32m"
@@ -65,9 +60,11 @@ static void cd(token path);
 static void jobs(void);
 static void exitWsh(void);
 static void killCmd(token job_num);
+
 /* SPECIALS */
 static int special(token *command);
 static void checkPipes(void);
+
 /*
  * Break args into valid commands.
  * Here we should also send appropriate flags to push the commmand to the
@@ -85,8 +82,7 @@ int parseExecCmd(char *buf) {
 
   while(*buf == ' ') {buf++;}
 
-  while (*buf != '\0') {
-   
+  while (*buf != '\0') {   
     switch(*buf) {
     case ' ':
       if(tok_i) {
@@ -203,7 +199,6 @@ int special(token *command) {
       }
     }
     else if(!strcmp(*command, "|")) {
-      
       pipe(pipefd);
       dup2(pipefd[1], dst);
       
@@ -272,6 +267,9 @@ void checkPipes() {
   }
 }
 
+/*
+ * Catches signals, discards any buffered data, and creates a new prompt
+ */
 void catchSIGINT(int signo) {
   //debugPrint("User tried to ctl-c! Signal #: %d", signo);
   INT_FLAG = 1;
@@ -490,9 +488,7 @@ int main(int argc, char **argv) {
     if(!INT_FLAG) {
       fprintf(stdout, "%s%s%s$ ", ANSI_GREEN, CUR_PATH, ANSI_RESET);
     }
-
   }
-
   freeWsh();
   exitWsh();
   return 0;
