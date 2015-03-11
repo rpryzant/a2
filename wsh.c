@@ -3,8 +3,11 @@
  * (c) 2015 Tony Liu and Reid Pryzant.
  * 
  * TODO:
+ *    -OUR WSH DOESN'T WORK AS AN INTERPRETER
+ *        -note that executing script is the same as typing "wsh script"
  *    -DEBUGGINGGGGGG
-  */
+ *    -Cleaning off whitespace unneeded in parseExecCmd?
+ */
 
 #include <stdio.h>
 #include <string.h>
@@ -19,6 +22,7 @@
 
 typedef char* token;
 typedef struct job job;
+
 struct job {
   int pid;
   int jid;
@@ -26,14 +30,15 @@ struct job {
 };
 
 //toggles debugPrints on and off
-static int debug = 0;
+static int debug = 1;
 
 #define debugPrint if (debug) printf
 #define ANSI_GREEN   "\x1b[32m"
 #define ANSI_RESET   "\x1b[0m"
-#define SPECIAL      0b1
-#define BUILTIN      0b10
 
+
+/* FLAGS */
+#define SPECIAL      0b1
 #define PIPE         2
 #define BACKGROUND   1
 #define FOREGROUND   0
@@ -68,7 +73,7 @@ static void checkPipes(void);
 /*
  * Break args into valid commands.
  * Here we should also send appropriate flags to push the commmand to the
- * right place (builtin, execute, or special), possibly returning an int?
+ * right place (builtin, execute, or special).
  * returns 0 when finished parsing commands.
  */
 int parseExecCmd(char *buf) {
@@ -80,7 +85,7 @@ int parseExecCmd(char *buf) {
   int tok_i = 0;
   int error;
 
-  while(*buf == ' ') {buf++;}
+  //  while(*buf == ' ') {buf++;}
 
   while (*buf != '\0') {   
     switch(*buf) {
@@ -158,6 +163,7 @@ int builtin(token *command) {
   }
   else if(!strcmp(first, "jobs")) {
     jobs();
+    debugPrint("Tony is unemployed.\n");
   }
   else if(!strcmp(first, "kill")) {
     killCmd(command[cur++]);
@@ -186,6 +192,7 @@ int special(token *command) {
   int file_descr;  
   int pipefd[2];
 
+  //for creating files with >
   mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
 
   while(*command) {
@@ -195,7 +202,7 @@ int special(token *command) {
     }
     else if(!strcmp(*command, "&")) {
       if(v_size(args)) {
-	execute((token *)v_data(args), BACKGROUND);
+	error += execute((token *)v_data(args), BACKGROUND);
 	v_reset(args);
       }
     }
@@ -239,19 +246,22 @@ int special(token *command) {
   }
 
   close(dst);
-  dst = dup2(stdout_copy, STDOUT_FILENO);
+  dup2(stdout_copy, STDOUT_FILENO);
   
   close(src);
-  src = dup2(stdin_copy, STDIN_FILENO);
+  dup2(stdin_copy, STDIN_FILENO);
   
   v_free(args);
 
+  //don't return until pipe children are completed
+  checkPipes();
+
+
   if(error) {
+    debugPrint("We have a special error!\n");
     return -1;
   }
   else {
-    //don't return until pipe children are completed
-    checkPipes();
     return 0;
   }
 }
@@ -333,6 +343,7 @@ void help(token command) {
  * Stops all processes managed by wsh and exits normally; cleans up all wsh mem used.
  */
 void exitWsh() {
+  //post: all memory held by wsh is released and we exit
   int size = cq_size(JOBS_CIRQ);
   job *cur;
   while(size--) {
@@ -360,7 +371,6 @@ void jobs() {
 }
 /*
  * Kills command specified by job_num
- * 
  */
 void killCmd(token job_num) {
   //pre: job_num is a valid job number
@@ -409,7 +419,7 @@ int execute(token *command, int context) {
   //post: the command is executed and status is returned.
   token first = *command;
   pid_t pid = vfork();
-  int status;
+  int status = 0;
 
   // child process
   if (pid == 0) {
@@ -428,7 +438,7 @@ int execute(token *command, int context) {
     p->pid = pid;
     p->jid = JOB_NUM++;
     
-    //UGLY
+    //allocs string for command name
     int i = 0;
     int buflen = 0;
     while(command[i])
@@ -446,6 +456,7 @@ int execute(token *command, int context) {
     cq_enq(JOBS_CIRQ, p);
     fprintf(stdout, "[%d] %d\n", p->jid, p->pid);
   }
+  //parent process, pipe
   else if(context == PIPE) {
     pid_t *p = (pid_t *)malloc(sizeof(pid_t));
     *p = pid;
@@ -484,6 +495,7 @@ void checkJobs(void) {
 
 int main(int argc, char **argv) {
   init();
+
   char buf[BUFSIZ];
 
   fprintf(stdout, "%s%s%s$ ", ANSI_GREEN, CUR_PATH, ANSI_RESET);
@@ -495,7 +507,7 @@ int main(int argc, char **argv) {
       fprintf(stdout, "%s%s%s$ ", ANSI_GREEN, CUR_PATH, ANSI_RESET);
     }
   }
-  freeWsh();
+
   exitWsh();
   return 0;
 }
