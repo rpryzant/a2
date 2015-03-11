@@ -1,12 +1,6 @@
 /*
  * An implementation of the Williams Shell.
  * (c) 2015 Tony Liu and Reid Pryzant.
- * 
- * TODO:
- *    -OUR WSH DOESN'T WORK AS AN INTERPRETER
- *        -note that executing script is the same as typing "wsh script"
- *    -DEBUGGINGGGGGG
- *    -Cleaning off whitespace unneeded in parseExecCmd?
  */
 
 #include <stdio.h>
@@ -30,7 +24,7 @@ struct job {
 };
 
 //toggles debugPrints on and off
-static int debug = 1;
+static int debug = 0;
 
 #define debugPrint if (debug) printf
 #define ANSI_GREEN   "\x1b[32m"
@@ -85,8 +79,6 @@ int parseExecCmd(char *buf) {
   int tok_i = 0;
   int error;
 
-  //  while(*buf == ' ') {buf++;}
-
   while (*buf != '\0') {   
     switch(*buf) {
     case ' ':
@@ -124,7 +116,16 @@ int parseExecCmd(char *buf) {
     default:
       tok[tok_i++] = *buf;
     }
+
     buf++;
+  }
+
+  //for scripts with no terminating newline
+  if(tok_i) {
+    v_add(cmd, strndup(tok, tok_i));
+  }
+  if(v_size(cmd) && !builtin((token *)v_data(cmd))) {               
+    error += execute((token *)v_data(cmd), FOREGROUND);
   }
 
   v_free(cmd);
@@ -279,7 +280,7 @@ void checkPipes() {
       cq_deq(PIPE_CIRQ);
       free(cur);
     }
-    cq_rot(JOBS_CIRQ);
+    cq_rot(PIPE_CIRQ);
   }
 }
 
@@ -297,7 +298,7 @@ void catchSIGINT(int signo) {
  * changes the current working directory to specified path
  */
 void cd(token path) {
-  if (!path) {
+  if (!path || !strcmp(path, "~")) {
     path = getenv("HOME");
   }
   if (!chdir(path)) {
@@ -328,7 +329,7 @@ void help(token command) {
       fprintf(stdout, "jobs: jobs \n\n\tLists the active jobs.\n");
     }
     else if(!strcmp(command, "kill")) {
-      fprintf(stdout, "kill: kill [pid] [SIGSPEC|SIGNUM]\n\n\tSend the process identified by PID the signal named by\n\tSIGSPEC or SIGNUM. If neither SIGSPEC or SIGNUM is present, then\n\tSIGTERM is assumed.\n");
+      fprintf(stdout, "kill: kill [jid] \n\n\tSend the process identified by JID the signal SIGINT.\n");
     }
     else {
       fprintf(stdout, "help: no help topics match '%s'.\n", command);
@@ -443,7 +444,7 @@ int execute(token *command, int context) {
     int buflen = 0;
     while(command[i])
       buflen += strlen(command[i++])+1;
-
+    
     char *name = (char *)malloc(buflen);
     
     i = 0;
@@ -452,9 +453,9 @@ int execute(token *command, int context) {
       strcat(name, " ");
     }
     p->name = name;
-
+    
     cq_enq(JOBS_CIRQ, p);
-    fprintf(stdout, "[%d] %d\n", p->jid, p->pid);
+    fprintf(stdout, "[%d] %d\n", p->jid, p->pid); 
   }
   //parent process, pipe
   else if(context == PIPE) {
@@ -495,19 +496,26 @@ void checkJobs(void) {
 
 int main(int argc, char **argv) {
   init();
-
   char buf[BUFSIZ];
 
-  fprintf(stdout, "%s%s%s$ ", ANSI_GREEN, CUR_PATH, ANSI_RESET);
-
-  while(buf == fgets(buf, BUFSIZ, stdin)) {
-    INT_FLAG = 0;
-    parseExecCmd(buf);
-    if(!INT_FLAG) {
-      fprintf(stdout, "%s%s%s$ ", ANSI_GREEN, CUR_PATH, ANSI_RESET);
+  //if we're executing a script
+  FILE *fd;
+  if(argv[1] && (fd = fopen(argv[1], "r"))) {
+    while(buf == fgets(buf, BUFSIZ, fd)) {
+      parseExecCmd(buf);
     }
   }
-
+  
+  else{  
+    fprintf(stdout, "%s%s%s$ ", ANSI_GREEN, CUR_PATH, ANSI_RESET);
+    while(buf == fgets(buf, BUFSIZ, stdin)) {
+      INT_FLAG = 0;
+      parseExecCmd(buf);
+      if(!INT_FLAG) {
+	fprintf(stdout, "%s%s%s$ ", ANSI_GREEN, CUR_PATH, ANSI_RESET);
+      }
+    }
+  }
   exitWsh();
   return 0;
 }

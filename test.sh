@@ -1,25 +1,27 @@
-ls; ls -a; ls -l ..;
+#!/home/16tl4/git/a2/wsh
 
-help > a.out; cat a.out; rm a.out;
+ls; ls -a; ls -l ..
 
-sleep 15&; jobs; sleep 10&; kill 0;
+help > a.out; cat a.out; rm a.out
 
-kill abc; kill 25;
+sleep 15&; jobs; sleep 10&
 
-touch a; mv a b; rm a;
+kill abc; kill 25
 
-cat -n<wsh.c;
+touch a; mv a b; rm a
 
-grep ^....$ /usr/share/dict/words   >flw; rm flw;
+#cat -n<wsh.c
 
->a; mv a b; cat a; cat b; rm a b;
+grep ^....$ /usr/share/dict/words   >flw; rm flw
 
-< a cat >b -s; rm b;
+#>a; mv a b; cat a; cat b; rm a b
 
-grep ^[diwas]*$ /usr/share/dict/words | grep ^.....$ | wc -l;
+#< a cat >b -s; rm b
 
-help | grep jobs;
+grep ^[diwas]*$ /usr/share/dict/words | grep ^.....$ | wc -l
 
-echo Done with testing!;
+help | grep jobs
 
-exit;
+echo Done with testing!
+
+exit
